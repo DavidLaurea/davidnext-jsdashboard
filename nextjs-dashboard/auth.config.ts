@@ -1,35 +1,60 @@
-import type { NextAuthConfig } from 'next-auth';
+// auth.config.ts
+import { NextResponse } from 'next/server'
+import type { NextAuthConfig } from 'next-auth'
+import NextAuth from 'next-auth'
+import CredentialsProvider from 'next-auth/providers/credentials'
+import { compare } from 'bcrypt'
+import { db } from './lib/db'  // adjust this path if your DB client is elsewhere
 
-export const authConfig = {
+export const authConfig: NextAuthConfig = {
+  providers: [
+    CredentialsProvider({
+      name: 'Credentials',
+      credentials: {
+        email: { label: 'Email', type: 'text' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials.password) {
+          return null
+        }
+        const user = await db.user.findUnique({
+          where: { email: credentials.email },
+        })
+        if (!user) return null
+
+        const isValid = await compare(credentials.password, user.hashedPassword)
+        if (!isValid) return null
+
+        return { id: user.id.toString(), email: user.email, name: user.name }
+      },
+    }),
+  ],
   pages: {
     signIn: '/login',
   },
-  providers: [
-    // added later in auth.ts since it requires bcrypt which is only compatible with Node.js
-    // while this file is also used in non-Node.js environments
-  ],
   callbacks: {
-    authorized({ auth, request: { nextUrl } }) {
-      const isLoggedIn = !!auth?.user;
-      const isOnDashboard = nextUrl.pathname.startsWith('/dashboard');
+    async authorized({ auth, request: { nextUrl } }) {
+      const isLoggedIn = !!auth?.user
+      const isOnDashboard = nextUrl.pathname.startsWith('/dashboard')
 
       // If user is on any /dashboard route:
       if (isOnDashboard) {
-        if (isLoggedIn) {
-          return true; // allow
-        }
-        return false; // show login (NextAuth will redirect automatically)
+        // allow if signed in, else block → NextAuth will redirect to /login
+        return isLoggedIn
       }
 
-      // If user is already signed in but is NOT on /dashboard, send them to /dashboard
+      // If user is already signed in but is NOT on /dashboard, redirect them
       if (isLoggedIn) {
-        // Use NextResponse.redirect and give it a valid base URL string
-        const dashboardUrl = new URL('/dashboard', nextUrl.origin);
-        return Response.redirect(dashboardUrl);
+        // Build a URL that points to /dashboard on the same origin
+        const dashboardUrl = new URL('/dashboard', nextUrl.origin)
+        return NextResponse.redirect(dashboardUrl)
       }
 
       // Otherwise (not on /dashboard and not logged in), allow
-      return true;
+      return true
     },
   },
-} satisfies NextAuthConfig;
+}
+
+export default NextAuth(authConfig)
