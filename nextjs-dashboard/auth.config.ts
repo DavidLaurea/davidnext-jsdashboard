@@ -1,10 +1,12 @@
-// auth.config.ts
-import { NextResponse } from 'next/server'
-import type { NextAuthConfig } from 'next-auth'
-import NextAuth from 'next-auth'
-import CredentialsProvider from 'next-auth/providers/credentials'
-import { compare } from 'bcrypt'
-import { db } from './lib/db'  // adjust this path if your DB client is elsewhere
+// app/auth.config.ts
+import { NextResponse } from 'next/server';
+import type { NextAuthConfig } from 'next-auth';
+import NextAuth from 'next-auth';
+import CredentialsProvider from 'next-auth/providers/credentials';
+import { compare } from 'bcrypt';
+
+// Import the SQL client from data.ts
+import { sql } from './lib/data';
 
 export const authConfig: NextAuthConfig = {
   providers: [
@@ -16,17 +18,29 @@ export const authConfig: NextAuthConfig = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials.password) {
-          return null
+          return null;
         }
-        const user = await db.user.findUnique({
-          where: { email: credentials.email },
-        })
-        if (!user) return null
 
-        const isValid = await compare(credentials.password, user.hashedPassword)
-        if (!isValid) return null
+        // Use `sql` to look up the user by email in your users table
+        const rows: { id: number; email: string; hashed_password: string; name: string }[] =
+          await sql`
+            SELECT id, email, hashed_password, name 
+            FROM users 
+            WHERE email = ${credentials.email}
+          `;
+        const userRow = rows[0];
+        if (!userRow) return null;
 
-        return { id: user.id.toString(), email: user.email, name: user.name }
+        // Compare the password with bcrypt
+        const isValid = await compare(credentials.password, userRow.hashed_password);
+        if (!isValid) return null;
+
+        // Return a minimal user object
+        return {
+          id: userRow.id.toString(),
+          email: userRow.email,
+          name: userRow.name,
+        };
       },
     }),
   ],
@@ -35,26 +49,24 @@ export const authConfig: NextAuthConfig = {
   },
   callbacks: {
     async authorized({ auth, request: { nextUrl } }) {
-      const isLoggedIn = !!auth?.user
-      const isOnDashboard = nextUrl.pathname.startsWith('/dashboard')
+      const isLoggedIn = !!auth?.user;
+      const isOnDashboard = nextUrl.pathname.startsWith('/dashboard');
 
-      // If user is on any /dashboard route:
       if (isOnDashboard) {
-        // allow if signed in, else block → NextAuth will redirect to /login
-        return isLoggedIn
+        // If accessing /dashboard routes, only allow if signed in
+        return isLoggedIn;
       }
 
-      // If user is already signed in but is NOT on /dashboard, redirect them
       if (isLoggedIn) {
-        // Build a URL that points to /dashboard on the same origin
-        const dashboardUrl = new URL('/dashboard', nextUrl.origin)
-        return NextResponse.redirect(dashboardUrl)
+        // If already signed in but not on /dashboard, redirect to /dashboard
+        const dashboardUrl = new URL('/dashboard', nextUrl.origin);
+        return NextResponse.redirect(dashboardUrl);
       }
 
       // Otherwise (not on /dashboard and not logged in), allow
-      return true
+      return true;
     },
   },
-}
+};
 
-export default NextAuth(authConfig)
+export default NextAuth(authConfig);
