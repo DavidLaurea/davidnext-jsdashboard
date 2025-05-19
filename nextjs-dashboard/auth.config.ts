@@ -25,7 +25,7 @@ export const authConfig = {
       if (isLoggedIn) {
         // Use NextResponse.redirect and give it a valid base URL string
         const dashboardUrl = new URL('/dashboard', nextUrl.origin);
-        return NextResponse.redirect(dashboardUrl);
+        return Response.redirect(dashboardUrl);
       }
 
       // Otherwise (not on /dashboard and not logged in), allow
